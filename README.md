@@ -33,7 +33,8 @@
 | --- | --- |
 | `ui:markdown` | 注册 Markdown 渲染扩展（把 mermaid 围栏换成图表） |
 | `ui:settings-section` | 提供「显示大小 / 布局密度」设置页 |
-| `assets:bundle` | 从插件目录读取随包资源 `mermaid.min.js` |
+| `i18n` | 注册中英文文案（zh-CN / en），界面跟随宿主语言 |
+| `assets:bundle` | 从插件自身包内读取随包资源 `mermaid.min.js`（本地文件，不联网） |
 | `storage` | 记住显示偏好 |
 
 不声明网络、执行外部命令等任何授权。

@@ -32,22 +32,15 @@ const LANGUAGE_PATTERN = /^language-(mermaid|mmd)$/i;
 /** 图表显示大小：统一等比缩放已渲染的 SVG（字号、线宽、箭头一起缩）。
  *  默认「原尺寸」——即不做缩放，保持 mermaid 出图的本来大小。 */
 const CHART_SCALES = [
-  { key: "small", label: "小", scale: 0.7, hint: "整图等比缩到 70%" },
-  { key: "medium", label: "中", scale: 0.85, hint: "整图等比缩到 85%" },
-  { key: "full", label: "原尺寸", scale: 1, hint: "不缩放，保持出图原始大小" },
+  { key: "small", scale: 0.7 },
+  { key: "medium", scale: 0.85 },
+  { key: "full", scale: 1 },
 ];
 /** 布局密度：决定 mermaid 自身的字号与节点间距，改密度需要重新出图。 */
 const CHART_DENSITIES = {
-  standard: {
-    key: "standard",
-    label: "标准",
-    hint: "mermaid 默认 16px 字号与默认间距（上一版外观）",
-    config: {},
-  },
+  standard: { key: "standard", config: {} },
   compact: {
     key: "compact",
-    label: "紧凑",
-    hint: "13px 字号 + 紧凑间距，长流程图明显省高度",
     config: {
       fontSize: 13,
       themeVariables: { fontSize: "13px" },
@@ -60,6 +53,51 @@ const SCALE_STORAGE_KEY = "chartScale";
 const DENSITY_STORAGE_KEY = "chartDensity";
 const DEFAULT_SCALE_KEY = "full";
 const DEFAULT_DENSITY_KEY = "standard";
+
+/** 文案资源：插件 UI 文本一律走这份表，并按 ctx.i18n 注册进宿主（审核规范 §6.4/§11.2）。 */
+const I18N_NAMESPACE = "mermaid-markdown";
+const MESSAGES = {
+  "zh-CN": {
+    sectionLabel: "图表大小",
+    sizeTitle: "显示大小",
+    densityTitle: "布局密度",
+    sizeNames: { small: "小", medium: "中", full: "原尺寸" },
+    densityNames: { standard: "标准", compact: "紧凑" },
+    sizeHints: {
+      small: "整图等比缩到 70%",
+      medium: "整图等比缩到 85%",
+      full: "不缩放，保持出图原始大小",
+    },
+    densityHints: {
+      standard: "mermaid 默认 16px 字号与默认间距",
+      compact: "13px 字号 + 紧凑间距，长流程图明显省高度",
+    },
+    optionLabel: (name, scale) => `${name}（×${scale}）`,
+    current: (size, scale, density) => `当前：${size} ×${scale} · 密度 ${density}`,
+    footer: "缩放是等比几何缩放（字号、线宽、箭头一起缩），只影响显示；密度决定 mermaid 出图时的字号与节点间距，改动会重新出图。",
+    failure: "Mermaid 渲染失败，以下为源码",
+  },
+  en: {
+    sectionLabel: "Chart size",
+    sizeTitle: "Display size",
+    densityTitle: "Layout density",
+    sizeNames: { small: "Small", medium: "Medium", full: "Full size" },
+    densityNames: { standard: "Standard", compact: "Compact" },
+    sizeHints: {
+      small: "Scale the whole diagram to 70%",
+      medium: "Scale the whole diagram to 85%",
+      full: "No scaling — the diagram's natural size",
+    },
+    densityHints: {
+      standard: "mermaid defaults: 16px labels, default spacing",
+      compact: "13px labels + tight spacing; much shorter long flowcharts",
+    },
+    optionLabel: (name, scale) => `${name} (×${scale})`,
+    current: (size, scale, density) => `Current: ${size} ×${scale} · density ${density}`,
+    footer: "Scaling shrinks the rendered SVG uniformly (labels, strokes, arrows) and only affects display; density sets the font size and node spacing mermaid renders with, which re-renders the diagram.",
+    failure: "Mermaid render failed — showing the source",
+  },
+};
 
 /** 图表挂载点标记：清理 mermaid 残留节点时用来排除「我们自己已挂载的图」。 */
 const HOST_ATTR = "data-ccgui-mermaid-host";
@@ -78,8 +116,10 @@ const SOURCE_PRE_STYLE = {
   margin: 0,
   padding: "10px 12px",
   overflowX: "auto",
-  border: "1px solid rgba(127, 127, 127, 0.28)",
+  border: "1px solid var(--color-border-button-default, rgba(127, 127, 127, 0.28))",
   borderRadius: 8,
+  background: "var(--color-background-secondary-default, transparent)",
+  color: "var(--color-text-primary, inherit)",
   fontSize: 12.5,
   lineHeight: 1.5,
 };
@@ -89,29 +129,29 @@ const FAILURE_NOTE_STYLE = {
   alignSelf: "flex-start",
   padding: "0 0 4px 2px",
   fontSize: 12,
-  opacity: 0.65,
+  color: "var(--color-text-secondary, inherit)",
 };
 
 const SCALE_BUTTON_STYLE = {
   padding: "6px 12px",
-  border: "1px solid rgba(127, 127, 127, 0.35)",
+  border: "1px solid var(--color-border-button-default, rgba(127, 127, 127, 0.35))",
   borderRadius: 6,
   background: "transparent",
-  color: "inherit",
+  color: "var(--color-text-primary, inherit)",
   fontSize: 13,
   cursor: "pointer",
 };
 
 const SCALE_BUTTON_ACTIVE_STYLE = {
-  borderColor: "currentcolor",
-  background: "rgba(127, 127, 127, 0.18)",
+  borderColor: "var(--color-accent-500, currentcolor)",
+  background: "var(--color-background-primary-hover, rgba(127, 127, 127, 0.18))",
   fontWeight: 600,
 };
 
 const SCALE_HINT_STYLE = {
   fontSize: 12,
   lineHeight: 1.6,
-  opacity: 0.65,
+  color: "var(--color-text-secondary, inherit)",
 };
 
 /* ------------------------------------------------------------------ *
@@ -188,6 +228,17 @@ function rehypeMermaidBlocks() {
 export default function activate(ctx) {
   const { createElement: h, useState, useEffect, useRef } = ctx.react;
   const logPrefix = `[${ctx.pluginId}]`;
+
+  /** 宿主 i18next 的语言码是 zh / en；zh 变体统一落到 zh-CN 文案。 */
+  function resolveLocale() {
+    const locale = String(ctx.host?.locale ?? "zh").toLowerCase();
+    return locale.startsWith("zh") ? "zh-CN" : "en";
+  }
+  const currentMessages = () => MESSAGES[resolveLocale()];
+  // 注册进宿主的 i18next（审核规范 §6.4）：zh-CN / zh 指向同一份文案，en 单独一份。
+  ctx.i18n.addBundle("zh-CN", I18N_NAMESPACE, MESSAGES["zh-CN"]);
+  ctx.i18n.addBundle("zh", I18N_NAMESPACE, MESSAGES["zh-CN"]);
+  ctx.i18n.addBundle("en", I18N_NAMESPACE, MESSAGES.en);
 
   /** mermaid 懒加载状态：promise 复用保证只注入一次 <script>。 */
   const mermaidState = { promise: null, mermaid: null, configuredTheme: null };
@@ -307,6 +358,9 @@ export default function activate(ctx) {
         reject(error);
         return;
       }
+      // 注入的是**插件自身包内**资源（host 的 pluginasset 源，路径由 ctx.assets
+      // 生成），不是远程脚本：规范 §6.5 允许执行包内 JS，禁止的是远程/目录授权
+      // 来源。这里不联网、不接受任何外部 URL。
       const script = document.createElement("script");
       script.src = url;
       script.async = true;
@@ -451,7 +505,7 @@ export default function activate(ctx) {
         : h(
             "div",
             { style: { display: "flex", flexDirection: "column", minWidth: 0, maxWidth: "100%" } },
-            failure ? h("div", { style: FAILURE_NOTE_STYLE }, "Mermaid 渲染失败，以下为源码") : null,
+            failure ? h("div", { style: FAILURE_NOTE_STYLE, title: failure }, currentMessages().failure) : null,
             h("pre", { style: SOURCE_PRE_STYLE }, h("code", null, code)),
           ),
     );
@@ -466,12 +520,12 @@ export default function activate(ctx) {
   }
 
   /** 单个档位行：标题 + 按钮组 + 当前档位说明。 */
-  function SettingRow({ title, options, activeKey, format, onSelect }) {
-    const active = options.find((option) => option.key === activeKey) ?? options[0];
+  function SettingRow({ title, options, activeKey, hintOf, format, onSelect }) {
+    const activeHint = hintOf(activeKey);
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: 8 } },
-      h("div", { style: { fontSize: 13, fontWeight: 600 } }, title),
+      h("div", { style: { fontSize: 13, fontWeight: 600, color: "var(--color-text-primary, inherit)" } }, title),
       h(
         "div",
         { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
@@ -482,7 +536,7 @@ export default function activate(ctx) {
               key: option.key,
               type: "button",
               "aria-pressed": option.key === activeKey ? "true" : "false",
-              title: option.hint,
+              title: hintOf(option.key),
               onClick: () => onSelect(option.key),
               style: {
                 ...SCALE_BUTTON_STYLE,
@@ -493,7 +547,7 @@ export default function activate(ctx) {
           ),
         ),
       ),
-      h("div", { style: SCALE_HINT_STYLE }, active.hint),
+      h("div", { style: SCALE_HINT_STYLE }, activeHint),
     );
   }
 
@@ -501,30 +555,35 @@ export default function activate(ctx) {
   function SettingsPanel() {
     const scaleKey = scaleSetting.useValue();
     const densityKey = densitySetting.useValue();
+    const m = currentMessages();
+    const scaleOf = (key) => CHART_SCALES.find((entry) => entry.key === key)?.scale ?? 1;
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: 16, padding: "4px 0", maxWidth: 560 } },
       h(SettingRow, {
-        title: "显示大小",
+        title: m.sizeTitle,
         options: CHART_SCALES,
         activeKey: scaleKey,
-        format: (option) => `${option.label}（×${option.scale}）`,
+        hintOf: (key) => m.sizeHints[key],
+        format: (option) => m.optionLabel(m.sizeNames[option.key], option.scale),
         onSelect: (key) => {
           scaleSetting.set(key);
           scaleSetting.save(key);
         },
       }),
       h(SettingRow, {
-        title: "布局密度",
+        title: m.densityTitle,
         options: Object.values(CHART_DENSITIES),
         activeKey: densityKey,
-        format: (option) => option.label,
+        hintOf: (key) => m.densityHints[key],
+        format: (option) => m.densityNames[option.key],
         onSelect: (key) => {
           densitySetting.set(key);
           densitySetting.save(key);
         },
       }),
-      h("div", { style: SCALE_HINT_STYLE }, "缩放是等比几何缩放（字号、线宽、箭头一起缩），只影响显示；密度决定 mermaid 出图时的字号与节点间距，改动会重新出图。"),
+      h("div", { style: SCALE_HINT_STYLE }, m.footer),
+      h("div", { style: SCALE_HINT_STYLE }, m.current(m.sizeNames[scaleKey], scaleOf(scaleKey), m.densityNames[densityKey])),
     );
   }
 
@@ -535,7 +594,7 @@ export default function activate(ctx) {
   });
   ctx.ui.registerSettingsSection({
     key: "size",
-    label: () => "图表大小",
+    label: () => currentMessages().sectionLabel,
     component: SettingsPanel,
   });
   console.info(`${logPrefix} 已注册 Markdown mermaid 渲染扩展`);

@@ -1,0 +1,46 @@
+name: release
+
+# 打 tag（与 manifest.json 的 version 一致）即产出 Release 附件：
+# main.js / manifest.json / mermaid.min.js —— 市场按这些附件安装插件。
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 校验 tag 与 manifest 版本一致
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          version="$(node -p "require('./manifest.json').version")"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::tag ${tag} 与 manifest.json 的 version ${version} 不一致（tag 不带 v 前缀）"
+            exit 1
+          fi
+          echo "tag ${tag} == manifest version ${version}"
+
+      - name: 校验插件文件齐备
+        run: |
+          set -euo pipefail
+          for file in manifest.json main.js mermaid.min.js; do
+            test -s "$file" || { echo "::error::缺少文件 $file"; exit 1; }
+          done
+          node -e "const m=require('./manifest.json'); if(m.id!=='mermaid-markdown'){throw new Error('unexpected manifest id '+m.id)}"
+
+      - name: 创建 Release 并附加插件文件
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            manifest.json
+            main.js
+            mermaid.min.js

@@ -1,0 +1,11 @@
+{
+  "id": "mermaid-markdown",
+  "name": "Mermaid 图表",
+  "version": "0.3.1",
+  "tier": "js",
+  "description": "把回答里的 ```mermaid 代码块渲染成真正的图表，大小与布局密度可调、支持深浅色主题",
+  "author": "zenghui6",
+  "repo": "zenghui6/ccgui-plugin-mermaid-markdown",
+  "license": "MIT",
+  "permissions": ["ui:markdown", "ui:settings-section", "assets:bundle", "storage"]
+}

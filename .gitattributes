@@ -1,0 +1,5 @@
+# 统一以 LF 入库（宿主按 UTF-8 文本读取插件文件）
+* text=auto eol=lf
+
+# 压缩后的第三方产物保持逐字节原样
+mermaid.min.js -text

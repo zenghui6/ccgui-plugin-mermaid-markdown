@@ -75,7 +75,7 @@ const MESSAGES = {
     optionLabel: (name, scale) => `${name}（×${scale}）`,
     current: (size, scale, density) => `当前：${size} ×${scale} · 密度 ${density}`,
     footer: "缩放是等比几何缩放（字号、线宽、箭头一起缩），只影响显示；密度决定 mermaid 出图时的字号与节点间距，改动会重新出图。",
-    failure: "Mermaid 渲染失败，以下为源码",
+    failureDetail: (error) => `Mermaid 渲染失败（${error}），以下为源码`,
   },
   en: {
     sectionLabel: "Chart size",
@@ -95,7 +95,7 @@ const MESSAGES = {
     optionLabel: (name, scale) => `${name} (×${scale})`,
     current: (size, scale, density) => `Current: ${size} ×${scale} · density ${density}`,
     footer: "Scaling shrinks the rendered SVG uniformly (labels, strokes, arrows) and only affects display; density sets the font size and node spacing mermaid renders with, which re-renders the diagram.",
-    failure: "Mermaid render failed — showing the source",
+    failureDetail: (error) => `Mermaid render failed (${error}) — showing the source`,
   },
 };
 
@@ -157,6 +157,12 @@ const SCALE_HINT_STYLE = {
 /* ------------------------------------------------------------------ *
  * rehype 改写（纯函数，不依赖 React / ctx）
  * ------------------------------------------------------------------ */
+
+/** 失败提示里显示的错误摘要：单行、限长，完整信息保留在 title 上。 */
+function shortError(value) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  return text.length > 160 ? `${text.slice(0, 157)}…` : text;
+}
 
 /** 递归取节点下所有文本（高亮插件可能已把代码切成 span 子树）。 */
 function collectText(node) {
@@ -424,14 +430,17 @@ export default function activate(ctx) {
     }
   }
 
-  /** 把 mermaid 产出的 SVG 字符串挂到容器上：DOMParser 解析后 import 节点，
-   *  比直接 innerHTML 少一次「把字符串当 HTML 执行」的路径。
+  /** 把 mermaid 产出的 SVG 字符串挂到容器上：按 text/html 解析后取 <svg> 节点再
+   *  import，与浏览器内联 SVG 的方式一致。**不能用 `image/svg+xml`**：标签里的
+   *  `<br/>` 会被 mermaid 序列化成 HTML 空标签 `<br>`（未自闭合），严格 XML 解析
+   *  直接报 "Opening and ending tag mismatch"，整张图降级成"渲染失败"（实测）。
+   *  解析失败时不抛异常，返回 false 交给组件显示源码。
    *  scale < 1 时按 viewBox 宽高重设 svg 尺寸——几何等比缩小（字号、线宽、
    *  箭头一起缩），比继续压字号更接近「整张图小一圈」且不会重排标签。 */
   function mountSvg(host, svg, scale) {
-    const parsed = new DOMParser().parseFromString(svg, "image/svg+xml");
-    const root = parsed.documentElement;
-    if (!root || String(root.nodeName).toLowerCase() !== "svg") return false;
+    const parsed = new DOMParser().parseFromString(svg, "text/html");
+    const root = parsed.querySelector("svg");
+    if (!root) return false;
     const viewBox = (root.getAttribute("viewBox") ?? "").split(/\s+/).map(Number);
     const naturalWidth = viewBox.length === 4 && Number.isFinite(viewBox[2]) && viewBox[2] > 0 ? viewBox[2] : null;
     if (naturalWidth && scale !== 1) {
@@ -505,7 +514,9 @@ export default function activate(ctx) {
         : h(
             "div",
             { style: { display: "flex", flexDirection: "column", minWidth: 0, maxWidth: "100%" } },
-            failure ? h("div", { style: FAILURE_NOTE_STYLE, title: failure }, currentMessages().failure) : null,
+            failure
+              ? h("div", { style: FAILURE_NOTE_STYLE, title: failure }, currentMessages().failureDetail(shortError(failure)))
+              : null,
             h("pre", { style: SOURCE_PRE_STYLE }, h("code", null, code)),
           ),
     );

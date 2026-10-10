@@ -81,6 +81,10 @@ const MESSAGES = {
     optionLabel: (name, scale) => `${name}（×${scale}）`,
     current: (size, scale, density) => `当前：${size} ×${scale} · 密度 ${density}`,
     footer: "缩放是等比几何缩放（字号、线宽、箭头一起缩），只影响显示；密度决定 mermaid 出图时的字号与节点间距，改动会重新出图。",
+    zoomHint: "点击放大",
+    zoomTitle: "放大查看",
+    zoomClose: "关闭",
+    zoomTip: "点击聊天里的图表可放大查看（Esc 或点空白关闭）。",
     failureDetail: (error) => `Mermaid 渲染失败（${error}），以下为源码`,
   },
   en: {
@@ -101,6 +105,10 @@ const MESSAGES = {
     optionLabel: (name, scale) => `${name} (×${scale})`,
     current: (size, scale, density) => `Current: ${size} ×${scale} · density ${density}`,
     footer: "Scaling shrinks the rendered SVG uniformly (labels, strokes, arrows) and only affects display; density sets the font size and node spacing mermaid renders with, which re-renders the diagram.",
+    zoomHint: "Click to enlarge",
+    zoomTitle: "Enlarged view",
+    zoomClose: "Close",
+    zoomTip: "Click a diagram in the chat to view it enlarged (Esc or click outside to close).",
     failureDetail: (error) => `Mermaid render failed (${error}) — showing the source`,
   },
 };
@@ -163,6 +171,66 @@ const SCALE_HINT_STYLE = {
   fontSize: 12,
   lineHeight: 1.6,
   color: "var(--color-text-secondary, inherit)",
+};
+
+/* 点击放大：视口级浮层。宿主给 overlay 容器设的是 pointer-events: none，
+ * 所以遮罩必须显式开回 auto，否则点不到。 */
+const ZOOM_BACKDROP_STYLE = {
+  position: "fixed",
+  inset: 0,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 24,
+  background: "rgba(0, 0, 0, 0.55)",
+  pointerEvents: "auto",
+};
+
+const ZOOM_PANEL_STYLE = {
+  display: "flex",
+  flexDirection: "column",
+  maxWidth: "min(1600px, 96vw)",
+  maxHeight: "92vh",
+  border: "1px solid var(--color-border-button-default, rgba(127, 127, 127, 0.35))",
+  borderRadius: 10,
+  background: "var(--color-background-primary-default, #fff)",
+  boxShadow: "0 24px 64px rgba(0, 0, 0, 0.35)",
+  overflow: "hidden",
+};
+
+const ZOOM_HEADER_STYLE = {
+  display: "flex",
+  alignItems: "center",
+  gap: 12,
+  padding: "8px 12px",
+  borderBottom: "1px solid var(--color-border-button-default, rgba(127, 127, 127, 0.28))",
+};
+
+const ZOOM_TITLE_STYLE = {
+  flex: "1 1 auto",
+  fontSize: 13,
+  fontWeight: 600,
+  color: "var(--color-text-primary, inherit)",
+};
+
+const ZOOM_CLOSE_STYLE = {
+  flex: "0 0 auto",
+  padding: "4px 10px",
+  border: "1px solid var(--color-border-button-default, rgba(127, 127, 127, 0.35))",
+  borderRadius: 6,
+  background: "transparent",
+  color: "var(--color-text-primary, inherit)",
+  fontSize: 12,
+  cursor: "pointer",
+};
+
+/** 放大视图内容区：横向/纵向都可滚动，图按原始尺寸显示（不缩小）。
+ *  必须用块级布局：flex 容器里子项默认 `flex-shrink: 1`，会把显式的
+ *  原始宽度压回容器宽度（实测 1895px 被压成 926px），块级才会溢出滚动。 */
+const ZOOM_BODY_STYLE = {
+  display: "block",
+  padding: 12,
+  overflow: "auto",
 };
 
 /* ------------------------------------------------------------------ *
@@ -441,6 +509,73 @@ export default function activate(ctx) {
     }
   }
 
+  /** 放大查看状态：聊天里的图表点击后交给 overlay 按原始尺寸显示。
+   *  聊天里的图和浮层是两个挂载点，用这份 activate 级状态互通。 */
+  const viewer = { svg: null, listeners: new Set() };
+
+  function publishViewer(svg) {
+    viewer.svg = svg;
+    for (const listener of viewer.listeners) listener(svg);
+  }
+
+  function useViewer() {
+    const [svg, setSvg] = useState(viewer.svg);
+    useEffect(() => {
+      const listener = (next) => setSvg(next);
+      viewer.listeners.add(listener);
+      return () => {
+        viewer.listeners.delete(listener);
+      };
+    }, []);
+    return svg;
+  }
+
+  /** 放大浮层：点遮罩、点关闭、按 Esc 都关闭；图按原始宽度渲染，容器滚动。 */
+  function ZoomOverlay() {
+    const svg = useViewer();
+    const bodyRef = useRef(null);
+
+    useEffect(() => {
+      if (!svg) return undefined;
+      const body = bodyRef.current;
+      if (body) mountSvg(body, svg, 1, { fitFloor: 0 });
+      const onKeyDown = (event) => {
+        if (event.key === "Escape") publishViewer(null);
+      };
+      document.addEventListener("keydown", onKeyDown);
+      return () => document.removeEventListener("keydown", onKeyDown);
+    }, [svg]);
+
+    if (!svg) return null;
+    const m = currentMessages();
+    return h(
+      "div",
+      {
+        style: ZOOM_BACKDROP_STYLE,
+        role: "dialog",
+        "aria-modal": "true",
+        "aria-label": m.zoomTitle,
+        onClick: () => publishViewer(null),
+      },
+      h(
+        "div",
+        { style: ZOOM_PANEL_STYLE, onClick: (event) => event.stopPropagation() },
+        h(
+          "div",
+          { style: ZOOM_HEADER_STYLE },
+          h("div", { style: ZOOM_TITLE_STYLE }, m.zoomTitle),
+          h(
+            "button",
+            { type: "button", style: ZOOM_CLOSE_STYLE, onClick: () => publishViewer(null) },
+            m.zoomClose,
+          ),
+        ),
+        // 关掉时清空挂载点由 React 卸载子树完成；容器只负责滚动。
+        h("div", { ref: bodyRef, style: ZOOM_BODY_STYLE }),
+      ),
+    );
+  }
+
   /** 把 mermaid 产出的 SVG 字符串挂到容器上：按 text/html 解析后取 <svg> 节点再
    *  import，与浏览器内联 SVG 的方式一致。**不能用 `image/svg+xml`**：标签里的
    *  `<br/>` 会被 mermaid 序列化成 HTML 空标签 `<br>`（未自闭合），严格 XML 解析
@@ -448,20 +583,23 @@ export default function activate(ctx) {
    *  解析失败时不抛异常，返回 false 交给组件显示源码。
    *  scale < 1 时按 viewBox 宽高重设 svg 尺寸——几何等比缩小（字号、线宽、
    *  箭头一起缩），比继续压字号更接近「整张图小一圈」且不会重排标签。 */
-  function mountSvg(host, svg, scale) {
+  function mountSvg(host, svg, scale, options = {}) {
     const parsed = new DOMParser().parseFromString(svg, "text/html");
     const root = parsed.querySelector("svg");
     if (!root) return false;
     const viewBox = (root.getAttribute("viewBox") ?? "").split(/\s+/).map(Number);
     const naturalWidth = viewBox.length === 4 && Number.isFinite(viewBox[2]) && viewBox[2] > 0 ? viewBox[2] : null;
+    // fitFloor=0（放大视图）表示完全不缩小：按原始宽度放，超出由容器滚动。
+    const fitFloor = options.fitFloor ?? MIN_FIT_RATIO;
     if (naturalWidth) {
       const targetWidth = Math.round(naturalWidth * scale);
       root.style.width = `${targetWidth}px`;
-      // 只允许为适配容器缩小到 MIN_FIT_RATIO：min-width 会在容器更窄时
-      // 压过 max-width（CSS 规则），于是图形保持可读字号、由容器横向滚动。
-      root.style.minWidth = `${Math.round(targetWidth * MIN_FIT_RATIO)}px`;
-      root.style.maxWidth = "100%";
+      // 只允许为适配容器缩小到 fitFloor：min-width 会在容器更窄时压过
+      // max-width（CSS 规则），于是图形保持可读字号、由容器横向滚动。
+      root.style.minWidth = `${Math.round(targetWidth * fitFloor)}px`;
+      root.style.maxWidth = fitFloor > 0 ? "100%" : "none";
       root.style.height = "auto";
+      root.style.display = "block";
       root.style.marginInline = "auto";
     }
     host.replaceChildren(document.importNode(root, true));
@@ -521,10 +659,34 @@ export default function activate(ctx) {
       }
     }, [svg, scaleKey]);
 
+    const openViewer = () => {
+      if (svg) publishViewer(svg);
+    };
+
     return h(
       "div",
       { style: WRAP_STYLE },
-      h("div", { ref: hostRef, [HOST_ATTR]: "1", style: svg ? { display: "contents" } : { display: "none" } }),
+      h("div", {
+        ref: hostRef,
+        [HOST_ATTR]: "1",
+        style: svg ? { display: "contents" } : { display: "none" },
+        // 渲染成功才可点：点击/回车把当前 SVG 交给浮层放大（浮层按原始尺寸显示）
+        ...(svg
+          ? {
+              role: "button",
+              tabIndex: 0,
+              title: currentMessages().zoomHint,
+              onClick: openViewer,
+              onKeyDown: (event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  openViewer();
+                }
+              },
+              style: { display: "contents", cursor: "zoom-in" },
+            }
+          : null),
+      }),
       svg
         ? null
         : h(
@@ -610,6 +772,7 @@ export default function activate(ctx) {
         },
       }),
       h("div", { style: SCALE_HINT_STYLE }, m.footer),
+      h("div", { style: SCALE_HINT_STYLE }, m.zoomTip),
       h("div", { style: SCALE_HINT_STYLE }, m.current(m.sizeNames[scaleKey], scaleOf(scaleKey), m.densityNames[densityKey])),
     );
   }
@@ -624,6 +787,8 @@ export default function activate(ctx) {
     label: () => currentMessages().sectionLabel,
     component: SettingsPanel,
   });
+  // 点击放大用的视口级浮层（ui:overlay）：平时渲染 null，只在点开图表时出现。
+  ctx.ui.registerOverlay({ key: "zoom", component: ZoomOverlay, order: 0 });
   console.info(`${logPrefix} 已注册 Markdown mermaid 渲染扩展`);
 
   void scaleSetting.load();
@@ -635,6 +800,7 @@ export default function activate(ctx) {
     themeListeners.clear();
     scaleSetting.dispose();
     densitySetting.dispose();
+    viewer.listeners.clear();
     console.info(`${logPrefix} 已卸载`);
   };
 }

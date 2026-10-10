@@ -1,7 +1,7 @@
 {
   "id": "mermaid-markdown",
   "name": "Mermaid 图表",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "minAppVersion": "1.1.0",
   "sdkVersion": "^0.3",
   "tier": "js",

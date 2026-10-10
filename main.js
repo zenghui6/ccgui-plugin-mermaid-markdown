@@ -36,6 +36,12 @@ const CHART_SCALES = [
   { key: "medium", scale: 0.85 },
   { key: "full", scale: 1 },
 ];
+/** 为塞进容器宽度而缩小的下限：再宽就保持这个比例并横向滚动。
+ *  无限等比缩小会把字缩成蚂蚁（宽图 = 负向反馈）；0.75 时默认密度下 16px
+ *  标签仍有 12px 实感（约等于正文），而只差几个百分点就能放下的图仍会
+ *  自动适配、不会为了 3% 溢出就长出滚动条。更宽才滚动取全，
+ *  这也是 GitHub / Obsidian 的 mermaid 预览思路（不缩放、容器滚动）。 */
+const MIN_FIT_RATIO = 0.75;
 /** 布局密度：决定 mermaid 自身的字号与节点间距，改密度需要重新出图。 */
 const CHART_DENSITIES = {
   standard: { key: "standard", config: {} },
@@ -102,13 +108,18 @@ const MESSAGES = {
 /** 图表挂载点标记：清理 mermaid 残留节点时用来排除「我们自己已挂载的图」。 */
 const HOST_ATTR = "data-ccgui-mermaid-host";
 
+/** 图表容器：横向可滚动，用来承载宽图（见 MIN_FIT_RATIO）。
+ *  `justify-content: center` 在内容溢出时会把左侧推出可滚动范围（经典 flex
+ *  溢出坑），所以改成 flex-start + SVG 自身 `margin-inline: auto`：
+ *  装得下时自动居中，装不下时左对齐且能滚到最左。 */
 const WRAP_STYLE = {
   display: "flex",
-  justifyContent: "center",
+  justifyContent: "flex-start",
   alignItems: "center",
   maxWidth: "100%",
   margin: "8px 0",
   overflowX: "auto",
+  overflowY: "hidden",
 };
 
 const SOURCE_PRE_STYLE = {
@@ -443,10 +454,15 @@ export default function activate(ctx) {
     if (!root) return false;
     const viewBox = (root.getAttribute("viewBox") ?? "").split(/\s+/).map(Number);
     const naturalWidth = viewBox.length === 4 && Number.isFinite(viewBox[2]) && viewBox[2] > 0 ? viewBox[2] : null;
-    if (naturalWidth && scale !== 1) {
-      root.style.width = `${Math.round(naturalWidth * scale)}px`;
+    if (naturalWidth) {
+      const targetWidth = Math.round(naturalWidth * scale);
+      root.style.width = `${targetWidth}px`;
+      // 只允许为适配容器缩小到 MIN_FIT_RATIO：min-width 会在容器更窄时
+      // 压过 max-width（CSS 规则），于是图形保持可读字号、由容器横向滚动。
+      root.style.minWidth = `${Math.round(targetWidth * MIN_FIT_RATIO)}px`;
       root.style.maxWidth = "100%";
       root.style.height = "auto";
+      root.style.marginInline = "auto";
     }
     host.replaceChildren(document.importNode(root, true));
     return true;
